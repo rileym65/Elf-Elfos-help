@@ -23,8 +23,38 @@ include    kernel.inc
            br      start
 
 include    date.inc
+include    build.inc
+           db      'Written by Michael H. Riley',0
 
-start:     mov     rf,hlpfile          ; where to copy filename            
+start:     lda     ra                  ; read byte from command line
+           smi     ' '                 ; see if it is a space
+           bz      start               ; move past any spaces
+           dec     ra                  ; move back to non-space character
+           ldn     ra                  ; retrieve byte
+           lbz     listbase            ; if no argument, list base lib
+           smi     '-'                 ; check for switch
+           lbnz    start2              ; jump if not
+           inc     ra                  ; point to next character
+           ldn     ra                  ; retrieve it
+           smi     'c'                 ; must be c
+           lbz     listcat             ; list categories
+           sep     scall               ; otherwise show error
+           dw      f_inmsg
+           db      'Invalid switch',10,13,0
+           lbr     o_wrmboot           ; return to Elf/OS
+start2:    sep     scall               ; see if category is provided
+           dw      hascat
+           ldn     ra                  ; get next byte of input
+           lbnz    nocat               ; jump if topic specified
+           mov     rf,catdir           ; point to category
+           sep     scall               ; open library
+           dw      openlib
+           lbnf    listlib             ; if opened, jumpt to list
+           sep     scall               ; otherwise display error
+           dw      f_inmsg
+           db      'Category not found',10,13,0
+           lbr     o_wrmboot           ; and return to Elf/OS
+nocat:     mov     rf,hlpfile          ; where to copy filename            
 loop1:     lda     ra                  ; look for first less <= space
            str     rf                  ; store for later
            inc     rf
@@ -45,7 +75,12 @@ loop1:     lda     ra                  ; look for first less <= space
            inc     rf
            ldi     0
            str     rf
-           mov     rf,hlpfile          ; point back to beginning of name
+           mov     r7,cat              ; see if category specified
+           ldn     r7                  ; get flag
+           lbz     nocat1              ; jump if no category
+           mov     rf,catdir           ; point to category filename
+           lbr     catyes              ; and process through library
+nocat1:    mov     rf,hlpfile          ; point back to beginning of name
            mov     rd,fildes           ; get file descriptor
            ldi     0                   ; flags for open
            plo     r7
@@ -60,11 +95,8 @@ loop1:     lda     ra                  ; look for first less <= space
            dw      o_open
            bnf     opened
            mov     rf,library          ; lastly check in help library
-           mov     rd,fildes           ; get file descriptor
-           ldi     0                   ; flags for open
-           plo     r7
-           sep     scall               ; attempt to open
-           dw      o_open
+catyes:    sep     scall               ; open base library
+           dw      openlib
            lbnf    chklib              ; jump to check library
 
            ldi     high errmsg         ; get error message
@@ -114,6 +146,9 @@ chklib_1:  mov     rf,dskbuffer        ; point to disk buffer
            glo     rc                  ; and if no bytes read
            lbz     nope
            mov     rf,dskbuffer        ; point back to disk buffer
+           ldn     rf                  ; check also XMODEM eof
+           smi     01ah
+           lbz     nope
            ldn     rf                  ; see if end of name
            lbz     chklib_2            ; jump if so
            str     r2                  ; store for comparison
@@ -196,10 +231,216 @@ nope:      sep     scall               ; display error
            db      'Not found',10,13,0
            lbr     o_wrmboot           ; return to Elf/OS
 
-           
+listbase:  mov     rf,library          ; lastly check in help library
+           sep     scall               ; open library
+           dw      openlib
+           lbnf    listlib             ; if opened, jumpt to list
+           sep     scall               ; otherwise display error
+           dw      f_inmsg
+           db      'Usage: help [category:]topic',10,13,0
+           lbr     o_wrmboot           ; return to Elf/OS
+
+listlib:   sep     scall               ; display message
+           dw      f_inmsg
+           db      'Available topics:',10,13,0
+lst_nmlp:  ldi     high buffer      ; point to buffer
+           phi     rf
+           ldi     low buffer 
+           plo     rf
+           ldi     0                   ; need to read 1 byte
+           phi     rc
+           ldi     1
+           plo     rc
+           sep     scall               ; read a byte
+           dw      o_read
+           lbdf    lst_done            ; jump if end of file
+           glo     rc                  ; check read count
+           lbz     lst_done            ; jump if end of file
+           ldi     high buffer         ; point to buffer
+           phi     rf
+           ldi     low buffer 
+           plo     rf
+           ldn     rf                  ; check for XMODEM eof
+           smi     01ah
+           lbz     lst_done            ; jump if so
+           ldn     rf                  ; get read byte
+           lbz     lst_nmdn            ; jump if end of name found
+           sep     scall               ; otherwise display it
+           dw      o_type
+           lbr     lst_nmlp            ; and keep going
+lst_nmdn:  sep     scall               ; move to next screen line
+           dw      crlf
+           ldi     high buffer      ; point to buffer
+           phi     rf
+           ldi     low buffer 
+           plo     rf
+           ldi     0                   ; need to read 5 bytes
+           phi     rc
+           ldi     5
+           plo     rc
+           sep     scall               ; read a byte
+           dw      o_read
+           lbdf    lst_done            ; jump if end of file
+           glo     rc
+           smi     5
+           lbnz    lst_done
+           ldi     high buffer      ; point to buffer
+           phi     rf
+           ldi     low buffer 
+           plo     rf
+           inc     rf                  ; move past flags byte
+           lda     rf                  ; retrieve element size
+           phi     r8
+           lda     rf
+           plo     r8
+           lda     rf
+           phi     r7
+           lda     rf
+           plo     r7
+           ldi     0                   ; select seek from current
+           phi     rc
+           ldi     1
+           plo     rc
+           sep     scall               ; seek file position
+           dw      o_seek
+           lbr     lst_nmlp            ; process next entry
+lst_done:  sep     scall               ; display a final CR/LF
+           dw      crlf
+           lbr     o_wrmboot           ; then back to Elf/OS
+crlf:      ldi     10                  ; send a LF
+           sep     scall
+           dw      o_type
+           ldi     13                  ; send a CF
+           sep     scall
+           dw      o_type
+           sep     sret                ; return to calelr
+
+
+
+; ****************************************
+; ***** Open library specified by RF *****
+; ****************************************
+openlib:   mov     rd,fildes           ; get file descriptor
+           ldi     0                   ; flags for open
+           plo     r7
+           sep     scall               ; attempt to open
+           dw      o_open
+           sep     sret                ; return to caller
+
+; ******************************************
+; ***** Check if category is specified *****
+; ******************************************
+hascat:    mov     rf,ra               ; copy address
+           mov     r7,catfile          ; point to cat file
+hascatlp:  lda     rf                  ; get byte from argument
+           str     r7                  ; store into cat file
+           inc     r7
+           plo     re                  ; save character
+           smi     33                  ; check for space or less
+           lbnf    hascatno            ; jump if space or terminator
+           glo     re                  ; check for 
+           smi     ':'                 ; check for colon
+           lbnz    hascatlp            ; loop back to keep testing
+           dec     r7                  ; need to overwrite : in catfile
+           ldi     '.'                 ; replace with .lbr
+           str     r7
+           inc     r7
+           ldi     'l'
+           str     r7
+           inc     r7
+           ldi     'b'
+           str     r7
+           inc     r7
+           ldi     'r'
+           str     r7
+           inc     r7
+           ldi     0
+           str     r7
+           mov     r7,cat              ; need to mark category found
+           ldi     0ffh
+           str     r7
+           mov     ra,rf               ; name now starts after colon
+           sep     sret                ; return to caller
+hascatno:  mov     r7,cat              ; mark no category found
+           ldi     0                   ; signal no category
+           str     r7
+           sep     sret                ; and return
+
+listcat:   mov     rf,catfile          ; terminate directory name
+           ldi     0
+           str     rf
+           mov     rf,catdir           ; point to pathname
+           mov     rd,fildes
+           sep     scall               ; open the directory
+           dw      o_opendir
+           lbnf    listcatlp           ; jump if good
+           sep     scall               ; otherwise display error
+           dw      f_inmsg
+           db      'Could not open /hlp/',10,13,0
+           lbr     o_wrmboot           ; return to Elf/OS
+listcatlp: mov     rf,dskbuffer        ; point to input buffer
+           mov     rc,32               ; need to read 32 bytes
+           sep     scall               ; read them
+           dw      o_read
+           glo     rc                  ; see if all bytes read
+           smi     32
+           lbnz    listcatdn           ; done if eof
+           mov     rf,dskbuffer        ; point back to buffer
+           lda     rf                  ; see if valid entry
+           lbnz    listcatgd
+           lda     rf
+           lbnz    listcatgd
+           lda     rf
+           lbnz    listcatgd
+           lda     rf
+           lbz     listcatlp           ; loop back if open entry
+listcatgd: sep     scall               ; see if pointing at a .lbr
+           dw      chklbr
+           lbnf    listcatlp           ; loop back if not
+           mov     rf,dskbuffer+12     ; point to filename
+listcatg1: lda     rf                  ; get byte
+           lbz     listcatg2           ; jump if done
+           sep     scall               ; otherwise display it
+           dw      f_type
+           lbr     listcatg1           ; loop back for reset of name
+listcatg2: sep     scall               ; display cr/lf
+           dw      f_inmsg
+           db      10,13,0
+           lbr     listcatlp           ; loop back for more entries
+listcatdn: sep     scall               ; close the directory
+           dw      o_close
+           lbr     o_wrmboot           ; and return to Elf/OS
+
+chklbr:    mov     rf,dskbuffer+12     ; point to filename
+chklbr1:   lda     rf                  ; retrieve byte from name
+           lbz     chklbrno            ; not lbr if terminator found
+           smi     '.'                 ; check for .
+           lbnz    chklbr1             ; jump if not
+           dec     rf                  ; change . to terminator
+           ldi     0
+           str     rf
+           inc     rf
+           lda     rf                  ; must have lbr extension
+           smi     'l'
+           lbnz    chklbrno
+           lda     rf
+           smi     'b'
+           lbnz    chklbrno
+           lda     rf
+           smi     'r'
+           lbnz    chklbrno
+           ldi     1                   ; mark as being a library
+           shr
+           sep     sret                ; and return
+chklbrno:  ldi     0                   ; mark as non-library
+           shr 
+           sep     sret                ; return to caller
 
 library:   db      '/hlp/hlp.lbr',0
 errmsg:    db      'File not found',10,13,0
+cat:       dw      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+catdir:    db      '/hlp/'
+catfile:   dw      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 fildes:    db      0,0,0,0
            dw      dta
            db      0,0
