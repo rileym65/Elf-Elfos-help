@@ -39,7 +39,7 @@ start:     lda     ra                  ; read byte from command line
            smi     'c'                 ; must be c
            lbz     listcat             ; list categories
            sep     scall               ; otherwise show error
-           dw      f_inmsg
+           dw      o_inmsg
            db      'Invalid switch',10,13,0
            lbr     o_wrmboot           ; return to Elf/OS
 start2:    sep     scall               ; see if category is provided
@@ -51,7 +51,7 @@ start2:    sep     scall               ; see if category is provided
            dw      openlib
            lbnf    listlib             ; if opened, jumpt to list
            sep     scall               ; otherwise display error
-           dw      f_inmsg
+           dw      o_inmsg
            db      'Category not found',10,13,0
            lbr     o_wrmboot           ; and return to Elf/OS
 nocat:     mov     rf,hlpfile          ; where to copy filename            
@@ -219,7 +219,7 @@ chklib_2:  ldn     ra                  ; get byte from filename
            mov     rf,dskbuffer        ; point to buffer
 entrylp:   lda     rf                  ; get byte from data
            sep     scall               ; display it
-           dw      f_type
+           dw      o_type
            dec     rc                  ; decrement count
            glo     rc                  ; see if done
            lbnz    entrylp             ; loop back if more to display
@@ -227,7 +227,7 @@ entrylp:   lda     rf                  ; get byte from data
            lbnz    entrylp             ; loop back if more to display
            lbr     o_wrmboot
 nope:      sep     scall               ; display error
-           dw      f_inmsg
+           dw      o_inmsg
            db      'Not found',10,13,0
            lbr     o_wrmboot           ; return to Elf/OS
 
@@ -236,12 +236,12 @@ listbase:  mov     rf,library          ; lastly check in help library
            dw      openlib
            lbnf    listlib             ; if opened, jumpt to list
            sep     scall               ; otherwise display error
-           dw      f_inmsg
+           dw      o_inmsg
            db      'Usage: help [category:]topic',10,13,0
            lbr     o_wrmboot           ; return to Elf/OS
 
 listlib:   sep     scall               ; display message
-           dw      f_inmsg
+           dw      o_inmsg
            db      'Available topics:',10,13,0
 lst_nmlp:  ldi     high buffer      ; point to buffer
            phi     rf
@@ -375,7 +375,7 @@ listcat:   mov     rf,catfile          ; terminate directory name
            dw      o_opendir
            lbnf    listcatlp           ; jump if good
            sep     scall               ; otherwise display error
-           dw      f_inmsg
+           dw      o_inmsg
            db      'Could not open /hlp/',10,13,0
            lbr     o_wrmboot           ; return to Elf/OS
 listcatlp: mov     rf,dskbuffer        ; point to input buffer
@@ -401,10 +401,10 @@ listcatgd: sep     scall               ; see if pointing at a .lbr
 listcatg1: lda     rf                  ; get byte
            lbz     listcatg2           ; jump if done
            sep     scall               ; otherwise display it
-           dw      f_type
+           dw      o_type
            lbr     listcatg1           ; loop back for reset of name
 listcatg2: sep     scall               ; display cr/lf
-           dw      f_inmsg
+           dw      o_inmsg
            db      10,13,0
            lbr     listcatlp           ; loop back for more entries
 listcatdn: sep     scall               ; close the directory
