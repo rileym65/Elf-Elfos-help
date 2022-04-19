@@ -6,24 +6,19 @@
 ; *** without express written permission from the author.         ***
 ; *******************************************************************
 
+.op "PUSH","N","9$1 73 8$1 73"
+.op "POP","N","60 72 A$1 F0 B$1"
+.op "CALL","W","D4 H1 L1"
+.op "RTN","","D5"
+.op "MOV","NR","9$2 B$1 8$2 A$1"
+.op "MOV","NW","F8 H2 B$1 F8 L2 A$1"
+
 include    bios.inc
 include    kernel.inc
 
-           org     8000h
-           lbr     0ff00h
-           db      'help',0
-           dw      9000h
-           dw      endrom+7000h
-           dw      2000h
-           dw      endrom-2000h
-           dw      2000h
-           db      0
- 
            org     2000h
-           br      start
-
-include    date.inc
-include    build.inc
+begin:     br      start
+           eever
            db      'Written by Michael H. Riley',0
 
 start:     lda     ra                  ; read byte from command line
@@ -41,7 +36,8 @@ start:     lda     ra                  ; read byte from command line
            sep     scall               ; otherwise show error
            dw      o_inmsg
            db      'Invalid switch',10,13,0
-           lbr     o_wrmboot           ; return to Elf/OS
+           ldi     9
+           sep     sret                ; return to Elf/OS
 start2:    sep     scall               ; see if category is provided
            dw      hascat
            ldn     ra                  ; get next byte of input
@@ -53,7 +49,8 @@ start2:    sep     scall               ; see if category is provided
            sep     scall               ; otherwise display error
            dw      o_inmsg
            db      'Category not found',10,13,0
-           lbr     o_wrmboot           ; and return to Elf/OS
+           ldi     0dh
+           sep     sret                ; and return to Elf/OS
 nocat:     mov     rf,hlpfile          ; where to copy filename            
 loop1:     lda     ra                  ; look for first less <= space
            str     rf                  ; store for later
@@ -105,13 +102,16 @@ catyes:    sep     scall               ; open base library
            plo     rf
            sep     scall               ; display it
            dw      o_msg
-           lbr     o_wrmboot           ; and return to os
+           ldi     0ch
+           sep     sret                ; and return to os
 opened:    mov     rb,rd               ; make copy of descriptor
            mov     rf,buffer           ; point to buffer
 
            ldi     0
            phi     r7
            plo     r7
+           ldi     23                  ; set line pointer
+           plo     r9
 
 mainlp:    ldi     0                   ; want to read 16 bytes
            phi     rc
@@ -125,16 +125,34 @@ mainlp:    ldi     0                   ; want to read 16 bytes
            lbz     done                ; jump if so
            mov     r8,buffer           ; point to read data
 linelp:    lda     r8                  ; get next byte
+           stxd                        ; save a copy
            sep     scall 
            dw      o_type
-           dec     rc                  ; decrement read count
+           irx
+           ldx
+           smi     13                  ; check for carriage return
+           lbnz    linelp2             ; jump if not
+           dec     r9                  ; decrement line count
+           glo     r9                  ; see if full page
+           lbnz    linelp2             ; jump if not
+           call    o_inmsg             ; display more message
+           db      10,'-MORE-',0
+           call    o_readkey           ; check keys
+           smi     3                   ; check for <CTRL><C>
+           lbz     done                ; exit if <ESC> is pressed
+           call    o_inmsg             ; display cr/lf
+           db      10,13,0
+           ldi     23                  ; reset line count
+           plo     r9
+linelp2:   dec     rc                  ; decrement read count
            glo     rc                  ; see if done
            lbnz    linelp              ; loop back if not
            lbr     mainlp              ; and loop back til done
 
 done:      sep     scall               ; close the file
            dw      o_close
-           lbr     o_wrmboot           ; return to os
+           ldi     0
+           sep     sret                ; return to os
 
 chklib:    mov     ra,hlpfile          ; point to desired helpfile name
 chklib_1:  mov     rf,dskbuffer        ; point to disk buffer
@@ -216,20 +234,43 @@ chklib_2:  ldn     ra                  ; get byte from filename
            lbdf    nope                ; jump on error
            glo     rc                  ; and if no bytes read
            lbz     nope
-           mov     rf,dskbuffer        ; point to buffer
-entrylp:   lda     rf                  ; get byte from data
+           mov     r8,dskbuffer        ; point to buffer
+           ldi     23                  ; set page size
+           plo     r9
+entrylp:   lda     r8                  ; get byte from data
+           stxd                        ; save a copy
            sep     scall               ; display it
            dw      o_type
-           dec     rc                  ; decrement count
+           irx
+           ldx
+           smi     13                  ; check for carriage return
+           lbnz    entrylp2            ; jump if not
+           dec     r9                  ; decrement line count
+           glo     r9                  ; see if full page
+           lbnz    entrylp2            ; jump if not
+           call    o_inmsg             ; display more message
+           db      10,'-MORE-',0
+           call    o_readkey           ; check keys
+           smi     3                   ; check for <CTRL><C>
+           lbnz    morego              ; exit if <ESC> is pressed
+           ldi     0
+           sep     sret
+morego:    call    o_inmsg             ; display cr/lf
+           db      10,13,0
+           ldi     23                  ; reset line count
+           plo     r9
+entrylp2:  dec     rc                  ; decrement count
            glo     rc                  ; see if done
            lbnz    entrylp             ; loop back if more to display
            ghi     rc
            lbnz    entrylp             ; loop back if more to display
-           lbr     o_wrmboot
+           ldi     0
+           sep     sret
 nope:      sep     scall               ; display error
            dw      o_inmsg
            db      'Not found',10,13,0
-           lbr     o_wrmboot           ; return to Elf/OS
+           ldi     0dh
+           sep     sret                ; return to Elf/OS
 
 listbase:  mov     rf,library          ; lastly check in help library
            sep     scall               ; open library
@@ -238,7 +279,8 @@ listbase:  mov     rf,library          ; lastly check in help library
            sep     scall               ; otherwise display error
            dw      o_inmsg
            db      'Usage: help [category:]topic',10,13,0
-           lbr     o_wrmboot           ; return to Elf/OS
+           ldi     0dh
+           sep     sret                ; return to Elf/OS
 
 listlib:   sep     scall               ; display message
            dw      o_inmsg
@@ -306,7 +348,8 @@ lst_nmdn:  sep     scall               ; move to next screen line
            lbr     lst_nmlp            ; process next entry
 lst_done:  sep     scall               ; display a final CR/LF
            dw      crlf
-           lbr     o_wrmboot           ; then back to Elf/OS
+           ldi     0
+           sep     sret                ; then back to Elf/OS
 crlf:      ldi     10                  ; send a LF
            sep     scall
            dw      o_type
@@ -377,7 +420,8 @@ listcat:   mov     rf,catfile          ; terminate directory name
            sep     scall               ; otherwise display error
            dw      o_inmsg
            db      'Could not open /hlp/',10,13,0
-           lbr     o_wrmboot           ; return to Elf/OS
+           ldi     08
+           sep     sret
 listcatlp: mov     rf,dskbuffer        ; point to input buffer
            mov     rc,32               ; need to read 32 bytes
            sep     scall               ; read them
@@ -409,7 +453,8 @@ listcatg2: sep     scall               ; display cr/lf
            lbr     listcatlp           ; loop back for more entries
 listcatdn: sep     scall               ; close the directory
            dw      o_close
-           lbr     o_wrmboot           ; and return to Elf/OS
+           ldi     0
+           sep     sret                ; and return to Elf/OS
 
 chklbr:    mov     rf,dskbuffer+12     ; point to filename
 chklbr1:   lda     rf                  ; retrieve byte from name
@@ -453,8 +498,12 @@ hlpfile:   db      0
 
 endrom:    equ     $
 
+.suppress
+
            org     03000h
 buffer:    equ     $
 dta:       equ     buffer+20
 dskbuffer: equ     dta+512
+
+           end     begin
 
